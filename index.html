@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Генератор табулатур для домбры онлайн — Аудио в табы и ноты</title>
+    <meta name="description" content="Бесплатный онлайн генератор табулатур для двухструнной домбры (строй D4/G4). Загрузите песню или мелодию, чтобы получить бегущие табы, штрихи и акустический плеер.">
+
+    <!-- Подключаем браузерную нейросеть Spotify Basic Pitch -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/dist/basic-pitch.min.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #12121c; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        h1 { margin-bottom: 5px; color: #a29bfe; text-align: center; }
+        .subtitle { color: #b2bec3; margin-bottom: 20px; text-align: center; max-width: 650px; font-size: 15px; line-height: 1.5; }
+
+        .upload-card { background: #1e1e2f; padding: 25px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); text-align: center; width: 100%; max-width: 500px; margin-bottom: 25px; border: 1px solid #3f3f5f; }
+        input[type="file"] { background: #2d2d44; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; margin-bottom: 15px; }
+        button { background: #6c5ce7; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #8258e5; }
+        button:disabled { background: #4a4a6a; cursor: not-allowed; }
+
+        #status { margin-top: 15px; font-size: 14px; color: #ffeaa7; font-weight: bold; }
+
+        .player-container { background: #1e1e2f; padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); width: 100%; max-width: 900px; display: none; flex-direction: column; gap: 20px; align-items: center; box-sizing: border-box; }
+        .controls { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; justify-content: center; }
+
+        .tab-window { width: 100%; height: 120px; background: #14141f; border: 2px solid #3f3f5f; border-radius: 8px; position: relative; overflow: hidden; display: flex; align-items: center; }
+        .tab-line { position: absolute; width: 100%; height: 2px; background: #555; left: 0; }
+        .tab-line.top { top: 40px; }
+        .tab-line.bottom { top: 80px; }
+        .cursor { position: absolute; left: 150px; top: 10px; width: 3px; height: 100px; background: #ff7675; z-index: 10; box-shadow: 0 0 10px #ff7675; }
+
+        .notes-track { position: absolute; left: 150px; display: flex; height: 100%; align-items: center; }
+        .tab-note { position: absolute; font-family: monospace; font-size: 18px; font-weight: bold; background: #2d2d44; padding: 4px 8px; border-radius: 4px; border: 1px solid #6c5ce7; transform: translateX(-50%); text-align: center; }
+        .tab-note.top { top: 20px; }
+        .tab-note.bottom { top: 60px; color: #00cec9; border-color: #00cec9; }
+
+        .fretboard-container { width: 100%; background: #252538; padding: 15px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; overflow-x: auto; box-sizing: border-box; }
+        canvas { background: #2b1d0c; border-radius: 6px; border: 2px solid #5a3d1e; box-shadow: inset 0 0 15px rgba(0,0,0,0.8); cursor: pointer; }
+
+        .time-display { font-size: 16px; font-family: monospace; color: #dfe6e9; }
+        .seo-footer { max-width: 800px; margin-top: 40px; color: #8395a7; font-size: 14px; line-height: 1.6; text-align: left; background: #181826; padding: 20px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+
+    <h1>🪕 Генератор табулатур для домбры</h1>
+    <p class="subtitle">Загрузите аудиофайл (MP3, WAV), чтобы автоматически перевести мелодию в табы для домбры (строй D4 / G4) и прослушать её на интерактивном грифе.</p>
+
+    <div class="upload-card">
+        <input type="file" id="audioInput" accept="audio/*">
+        <button id="analyzeBtn" onclick="processAudio()">Распознать мелодию (первые 45 сек)</button>
+        <div id="status">Выберите файл для начала работы</div>
+    </div>
+
+    <div class="player-container" id="playerContainer">
+        <div class="time-display">Время: <span id="currentTime">0.00</span> с | Нот: <span id="noteCount">0</span></div>
+
+        <div class="controls">
+            <button id="playBtn" onclick="togglePlay()">▶ Играть на домбре</button>
+            <button onclick="resetPlayer()">⏮ Сначала</button>
+            <label style="font-size: 14px; color: #b2bec3;">Темп:
+                <select id="speedSelect" onchange="changeSpeed()" style="padding: 8px; border-radius: 4px; background: #2d2d44; color: white; border: 1px solid #6c5ce7;">
+                    <option value="0.75">0.75x</option>
+                    <option value="1.0" selected>1.0x</option>
+                    <option value="1.25">1.25x</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="tab-window">
+            <div class="cursor"></div>
+            <div class="tab-line top"></div>
+            <div class="tab-line bottom"></div>
+            <div class="notes-track" id="notesTrack"></div>
+        </div>
+
+        <div class="fretboard-container">
+            <p style="margin: 0 0 10px 0; font-weight: bold; color: #f1c40f; font-size: 14px;">Интерактивный гриф домбры (нажмите на любой лад, чтобы услышать звук)</p>
+            <canvas id="fretboardCanvas" width="850" height="130"></canvas>
+        </div>
+    </div>
+
+    <div class="seo-footer">
+        <h3>Как пользоваться онлайн-генератором табов для домбры?</h3>
+        <p>Этот инструмент анализирует аудиозапись прямо в вашем браузере с помощью нейросети и перекладывает ведущую мелодию на классический строй двухструнной домбры: верхняя струна <b>Ре (D4)</b> и нижняя струна <b>Соль (G4)</b>. Для лучшего результата загружайте чистые инструментальные партии (фортепиано, гитару, домбру) без лишних шумов и вокала. Стрелки <b>↓</b> и <b>↑</b> подсказывают направление штриха правой руки.</p>
+    </div>
+
+    <script>
+        let tabsData = [];
+        let isPlaying = false;
+        let startTime = 0;
+        let pausedAt = 0;
+        let playbackSpeed = 1.0;
+        let animationId = null;
+        let audioCtx = null;
+        let playedNotes = new Set();
+
+        const pxPerSecond = 140;
+        const notesTrack = document.getElementById('notesTrack');
+        const currentTimeEl = document.getElementById('currentTime');
+        const canvas = document.getElementById('fretboardCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // Физический синтез щипка струны (алгоритм Карплуса-Стронга)
+        function playDombraString(midiNote) {
+            initAudio();
+            const freq = 440 * Math.pow(2, (midiNote - 69) / 12);
+            const sampleRate = audioCtx.sampleRate;
+            const duration = 1.4;
+            const totalSamples = Math.floor(sampleRate * duration);
+
+            const buffer = audioCtx.createBuffer(1, totalSamples, sampleRate);
+            const data = buffer.getChannelData(0);
+            const delayLength = Math.floor(sampleRate / freq);
+            const ringBuffer = new Float32Array(delayLength);
+
+            for (let i = 0; i < delayLength; i++) {
+                ringBuffer[i] = (Math.random() * 2 - 1);
+            }
+
+            const decay = 0.992;
+            let ptr = 0;
+
+            for (let i = 0; i < totalSamples; i++) {
+                const currentSample = ringBuffer[ptr];
+                const nextSample = ringBuffer[(ptr + 1) % delayLength];
+                const filtered = 0.5 * (currentSample + nextSample) * decay;
+                ringBuffer[ptr] = filtered;
+                data[i] = currentSample;
+                ptr = (ptr + 1) % delayLength;
+            }
+
+            const source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+
+            const bodyFilter = audioCtx.createBiquadFilter();
+            bodyFilter.type = 'peaking';
+            bodyFilter.frequency.value = 320;
+            bodyFilter.Q.value = 2.0;
+            bodyFilter.gain.value = 6.0;
+
+            const masterGain = audioCtx.createGain();
+            masterGain.gain.value = 0.7;
+
+            source.connect(bodyFilter);
+            bodyFilter.connect(masterGain);
+            masterGain.connect(audioCtx.destination);
+            source.start();
+        }
+
+        function fitToDombraRange(midiPitch, minMidi = 62, maxMidi = 86) {
+            while (midiPitch < minMidi) midiPitch += 12;
+            while (midiPitch > maxMidi) midiPitch -= 12;
+            return midiPitch;
+        }
+
+        function noteToDombraTab(midiPitch) {
+            const tuningTop = 62;    // D4
+            const tuningBottom = 67; // G4
+            const adjustedMidi = fitToDombraRange(midiPitch, tuningTop, tuningBottom + 19);
+
+            const fretTop = adjustedMidi - tuningTop;
+            const fretBottom = adjustedMidi - tuningBottom;
+
+            if (fretBottom >= 0 && fretBottom <= 14) {
+                return { string: 'bottom', fret: fretBottom, midi: adjustedMidi };
+            } else if (fretTop >= 0 && fretTop <= 14) {
+                return { string: 'top', fret: fretTop, midi: adjustedMidi };
+            } else if (fretBottom >= 0 && fretBottom <= 19) {
+                return { string: 'bottom', fret: fretBottom, midi: adjustedMidi };
+            } else {
+                return { string: 'top', fret: Math.max(0, Math.min(19, fretTop)), midi: adjustedMidi };
+            }
+        }
+
+        // Ресемплинг аудио в 22050 Гц моно (требование модели Basic Pitch)
+        async function resampleTo22050Mono(audioBuffer, maxSeconds = 45) {
+            const targetRate = 22050;
+            const duration = Math.min(audioBuffer.duration, maxSeconds);
+            const offlineCtx = new OfflineAudioContext(1, Math.ceil(duration * targetRate), targetRate);
+            const source = offlineCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineCtx.destination);
+            source.start(0, 0, duration);
+            return await offlineCtx.startRendering();
+        }
+
+        async function processAudio() {
+            const fileInput = document.getElementById('audioInput');
+            if (!fileInput.files.length) {
+                alert('Сначала выберите аудиофайл!');
+                return;
+            }
+
+            const btn = document.getElementById('analyzeBtn');
+            btn.disabled = true;
+            statusEl.innerText = '⏳ Читаем и подготавливаем аудио...';
+
+            try {
+                initAudio();
+                const arrayBuffer = await fileInput.files[0].arrayBuffer();
+                const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                const resampledBuffer = await resampleTo22050Mono(decodedBuffer, 45);
+
+                statusEl.innerText = '🧠 Загружаем нейросеть и распознаем ноты (это займет 5–15 секунд)...';
+
+                const modelUrl = 'https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/model/model.json';
+                const basicPitch = new BasicPitch(modelUrl);
+
+                const frames = [];
+                const onsets = [];
+                const contours = [];
+
+                await basicPitch.evaluateModel(
+                    resampledBuffer,
+                    (f, o, c) => {
+                        frames.push(...f);
+                        onsets.push(...o);
+                        contours.push(...c);
+                    },
+                    (percent) => {
+                        statusEl.innerText = `🧠 Анализ мелодии: ${Math.round(percent * 100)}%`;
+                    }
+                );
+
+                const rawNotes = outputToNotesPoly(frames, onsets, 0.55, 0.4, 5);
+                const noteEvents = noteFramesToTime(rawNotes);
+
+                // Фильтруем и оставляем ведущую монофоническую мелодию
+                let cleaned = noteEvents
+                    .filter(n => n.durationSeconds >= 0.12 && n.amplitude >= 0.35)
+                    .map(n => ({
+                        start: Math.round(n.startTimeSeconds * 100) / 100,
+                        midi: n.pitchMidi
+                    }))
+                    .sort((a, b) => a.start - b.start || b.midi - a.midi);
+
+                let monophonic = [];
+                for (let n of cleaned) {
+                    if (!monophonic.length) {
+                        monophonic.push(n);
+                        continue;
+                    }
+                    let prev = monophonic[monophonic.length - 1];
+                    if (Math.abs(n.start - prev.start) < 0.08) {
+                        if (n.midi > prev.midi) monophonic[monophonic.length - 1] = n;
+                    } else {
+                        monophonic.push(n);
+                    }
+                }
+
+                tabsData = [];
+                let strokeToggle = true;
+                let lastTime = 0;
+
+                for (let n of monophonic) {
+                    const tab = noteToDombraTab(n.midi);
+                    let stroke;
+                    if (n.start - lastTime > 0.35) {
+                        stroke = '↓';
+                        strokeToggle = true;
+                    } else {
+                        stroke = strokeToggle ? '↓' : '↑';
+                        strokeToggle = !strokeToggle;
+                    }
+                    lastTime = n.start;
+
+                    tabsData.push({
+                        time: n.start,
+                        string: tab.string,
+                        fret: tab.fret,
+                        midi: tab.midi,
+                        stroke: stroke
+                    });
+                }
+
+                document.getElementById('noteCount').innerText = tabsData.length;
+                document.getElementById('playerContainer').style.display = 'flex';
+                resetPlayer();
+                initTabs();
+                drawFretboard(null, null);
+                statusEl.innerText = `✅ Готово! Распознано ${tabsData.length} нот.`;
+
+            } catch (err) {
+                console.error(err);
+                statusEl.innerText = '❌ Ошибка при обработке файла: ' + err.message;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const startX = 40;
+            const endX = 820;
+            const fretWidth = (endX - startX) / 19;
+
+            let fret = x >= startX ? Math.min(19, Math.floor((x - startX) / fretWidth) + 1) : 0;
+            const isTop = y < 65;
+            const baseMidi = isTop ? 62 : 67;
+            playDombraString(baseMidi + fret);
+            drawFretboard(isTop ? 'top' : 'bottom', fret);
+            setTimeout(() => { if (!isPlaying) drawFretboard(null, null); }, 300);
+        });
+
+        function initTabs() {
+            notesTrack.innerHTML = '';
+            tabsData.forEach((item) => {
+                const el = document.createElement('div');
+                el.className = `tab-note ${item.string}`;
+                el.style.left = `${item.time * pxPerSecond}px`;
+                el.innerHTML = `${item.fret}<br><span style="font-size:12px;">${item.stroke}</span>`;
+                notesTrack.appendChild(el);
+            });
+        }
+
+        function drawFretboard(activeString, activeFret) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const numFrets = 19;
+            const startX = 40;
+            const endX = 820;
+            const fretWidth = (endX - startX) / numFrets;
+
+            const markers = [2, 4, 5, 7, 9, 12, 14, 17, 19];
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+            markers.forEach(m => {
+                let mx = startX + (m - 0.5) * fretWidth;
+                ctx.beginPath();
+                ctx.arc(mx, 65, 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            ctx.strokeStyle = '#c8b193';
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= numFrets; i++) {
+                let x = startX + i * fretWidth;
+                ctx.beginPath();
+                ctx.moveTo(x, 15);
+                ctx.lineTo(x, 115);
+                ctx.stroke();
+
+                if (i > 0) {
+                    ctx.fillStyle = '#b2bec3';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(i, x - fretWidth/2 - 3, 12);
+                }
+            }
+
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(startX, 45);
+            ctx.lineTo(endX, 45);
+            ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Arial';
+            ctx.fillText("D (Верх)", 5, 49);
+
+            ctx.beginPath();
+            ctx.moveTo(startX, 85);
+            ctx.lineTo(endX, 85);
+            ctx.stroke();
+            ctx.fillText("G (Низ)", 5, 89);
+
+            if (activeFret !== null && activeFret >= 0 && activeFret <= 19) {
+                let stringY = (activeString === 'top') ? 45 : 85;
+                let xPos = (activeFret === 0) ? startX - 15 : startX + (activeFret - 0.5) * fretWidth;
+
+                ctx.fillStyle = '#1e272e';
+                ctx.beginPath();
+                ctx.arc(xPos, stringY, 9, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ff7675';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+            }
+        }
+
+        function changeSpeed() {
+            const newSpeed = parseFloat(document.getElementById('speedSelect').value);
+            if (isPlaying) {
+                const now = performance.now() / 1000;
+                pausedAt = (now - startTime) * playbackSpeed;
+                playbackSpeed = newSpeed;
+                startTime = now - (pausedAt / playbackSpeed);
+            } else {
+                playbackSpeed = newSpeed;
+            }
+        }
+
+        function togglePlay() {
+            initAudio();
+            if (!isPlaying) startPlayback();
+            else pausePlayback();
+        }
+
+        function startPlayback() {
+            isPlaying = true;
+            document.getElementById('playBtn').innerText = '⏸ Пауза';
+            startTime = performance.now() / 1000 - (pausedAt / playbackSpeed);
+            animationId = requestAnimationFrame(updatePlayer);
+        }
+
+        function pausePlayback() {
+            isPlaying = false;
+            document.getElementById('playBtn').innerText = '▶ Играть на домбре';
+            cancelAnimationFrame(animationId);
+            pausedAt = ((performance.now() / 1000) - startTime) * playbackSpeed;
+        }
+
+        function resetPlayer() {
+            pausePlayback();
+            pausedAt = 0;
+            playedNotes.clear();
+            currentTimeEl.innerText = "0.00";
+            notesTrack.style.transform = `translateX(0px)`;
+            drawFretboard(null, null);
+        }
+
+        function updatePlayer() {
+            if (!isPlaying) return;
+            const currentTime = ((performance.now() / 1000) - startTime) * playbackSpeed;
+            currentTimeEl.innerText = currentTime.toFixed(2);
+
+            const moveX = -currentTime * pxPerSecond;
+            notesTrack.style.transform = `translateX(${moveX}px)`;
+
+            let activeNote = null;
+            for (let i = 0; i < tabsData.length; i++) {
+                let item = tabsData[i];
+                if (Math.abs(item.time - currentTime) < 0.08) {
+                    activeNote = item;
+                    if (!playedNotes.has(i)) {
+                        playDombraString(item.midi);
+                        playedNotes.add(i);
+                    }
+                    break;
+                }
+            }
+
+            if (activeNote) drawFretboard(activeNote.string, activeNote.fret);
+            else drawFretboard(null, null);
+
+            animationId = requestAnimationFrame(updatePlayer);
+        }
+    </script>
+</body>
+</html>
