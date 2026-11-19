@@ -86,8 +86,8 @@
         <p>Этот инструмент анализирует аудиозапись прямо в вашем браузере с помощью нейросети и перекладывает ведущую мелодию на классический строй двухструнной домбры: верхняя струна <b>Ре (D4)</b> и нижняя струна <b>Соль (G4)</b>. Для лучшего результата загружайте чистые инструментальные партии (фортепиано, гитару, домбру) без лишних шумов и вокала. Стрелки <b>↓</b> и <b>↑</b> подсказывают направление штриха правой руки.</p>
     </div>
 
-    <script type="module">
-        import { BasicPitch, outputToNotesPoly, noteFramesToTime } from "https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/esm/index.js";
+    <script>
+        let basicPitchModulePromise = null;
 
         let tabsData = [];
         let isPlaying = false;
@@ -215,8 +215,22 @@
                 const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
                 const resampledBuffer = await resampleTo22050Mono(decodedBuffer, 45);
 
-                statusEl.innerText = '🧠 Загружаем нейросеть и распознаем ноты (это займет 5–15 секунд)...';
+                statusEl.innerText = '🧠 Загружаем библиотеку и нейросеть...';
 
+                if (!basicPitchModulePromise) {
+                    basicPitchModulePromise = import('https://esm.sh/@spotify/basic-pitch@1.0.1?bundle');
+                }
+                let pitchModule;
+                try {
+                    pitchModule = await basicPitchModulePromise;
+                } catch (loadErr) {
+                    basicPitchModulePromise = null;
+                    throw new Error('Не удалось загрузить библиотеку Basic Pitch. Проверь интернет или открой Console (F12). ' + loadErr.message);
+                }
+                const { BasicPitch, outputToNotesPoly, noteFramesToTime } = pitchModule;
+                if (!BasicPitch || !outputToNotesPoly || !noteFramesToTime) {
+                    throw new Error('В загруженной библиотеке отсутствуют нужные функции.');
+                }
                 const modelUrl = 'https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/model/model.json';
                 const basicPitch = new BasicPitch(modelUrl);
 
@@ -459,11 +473,6 @@
             animationId = requestAnimationFrame(updatePlayer);
         }
 
-        // Функции, вызываемые из HTML-кнопок
-        window.processAudio = processAudio;
-        window.togglePlay = togglePlay;
-        window.resetPlayer = resetPlayer;
-        window.changeSpeed = changeSpeed;
     </script>
 </body>
 </html>
