@@ -6,9 +6,7 @@
     <title>Генератор табулатур для домбры онлайн — Аудио в табы и ноты</title>
     <meta name="description" content="Бесплатный онлайн генератор табулатур для двухструнной домбры (строй D4/G4). Загрузите песню или мелодию, чтобы получить бегущие табы, штрихи и акустический плеер.">
 
-    <!-- Подключаем браузерную нейросеть Spotify Basic Pitch -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/dist/basic-pitch.min.js"></script>
+    <!-- Basic Pitch загружается как ES-модуль в нижнем script-блоке -->
 
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #12121c; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
@@ -88,7 +86,9 @@
         <p>Этот инструмент анализирует аудиозапись прямо в вашем браузере с помощью нейросети и перекладывает ведущую мелодию на классический строй двухструнной домбры: верхняя струна <b>Ре (D4)</b> и нижняя струна <b>Соль (G4)</b>. Для лучшего результата загружайте чистые инструментальные партии (фортепиано, гитару, домбру) без лишних шумов и вокала. Стрелки <b>↓</b> и <b>↑</b> подсказывают направление штриха правой руки.</p>
     </div>
 
-    <script>
+    <script type="module">
+        import { BasicPitch, outputToNotesPoly, noteFramesToTime } from "https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/esm/index.js";
+
         let tabsData = [];
         let isPlaying = false;
         let startTime = 0;
@@ -458,6 +458,12 @@
 
             animationId = requestAnimationFrame(updatePlayer);
         }
+
+        // Функции, вызываемые из HTML-кнопок
+        window.processAudio = processAudio;
+        window.togglePlay = togglePlay;
+        window.resetPlayer = resetPlayer;
+        window.changeSpeed = changeSpeed;
     </script>
 </body>
 </html>
